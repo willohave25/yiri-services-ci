@@ -6,7 +6,6 @@
 
 var W2KAutoScroll = (function () {
 
-  /* Configuration par défaut */
   var config = {
     speed: 'slow',
     pauseDuration: 20,
@@ -15,26 +14,26 @@ var W2KAutoScroll = (function () {
   };
 
   var state = {
-    isScrolling: false,
+    isAutoScrolling: false,
     isPaused: false,
     currentSection: 0,
     sections: [],
     timer: null,
     inactivityTimer: null,
     indicator: null,
-    startDelay: 5000
+    startDelay: 5000,
+    ignoreScroll: false
   };
 
-  /* Vitesses de défilement en ms */
+  /* Durée animation scroll en ms */
   var speeds = {
     slow: 2500,
-    medium: 1500,
+    medium: 1800,
     fast: 1000
   };
 
   /* Initialisation */
   function init(options) {
-    /* Fusionner options */
     if (options) {
       for (var key in options) {
         if (options.hasOwnProperty(key)) {
@@ -43,25 +42,24 @@ var W2KAutoScroll = (function () {
       }
     }
 
-    /* Récupérer sections */
     state.sections = document.querySelectorAll('[data-autoscroll]');
     if (state.sections.length === 0) return;
 
-    /* Créer indicateur visuel */
     if (config.showIndicator) {
       creerIndicateur();
     }
 
-    /* Écouter interactions utilisateur */
     ecouterInteractions();
 
-    /* Démarrer après délai initial */
+    /* Démarrage après délai initial */
     setTimeout(function () {
-      demarrerAutoScroll();
+      state.isPaused = false;
+      planifierProchainScroll();
+      majIndicateur();
     }, state.startDelay);
   }
 
-  /* Créer indicateur visuel */
+  /* Indicateur visuel */
   function creerIndicateur() {
     state.indicator = document.createElement('div');
     state.indicator.className = 'w2k-scroll-indicator';
@@ -69,20 +67,16 @@ var W2KAutoScroll = (function () {
     document.body.appendChild(state.indicator);
   }
 
-  /* Démarrer auto-scroll */
-  function demarrerAutoScroll() {
-    if (state.isPaused) return;
-    state.isScrolling = true;
-
-    if (state.indicator) {
+  function majIndicateur() {
+    if (!state.indicator) return;
+    if (state.isPaused) {
+      state.indicator.classList.add('paused');
+    } else {
       state.indicator.classList.remove('paused');
     }
-
-    /* Planifier prochain scroll */
-    planifierProchainScroll();
   }
 
-  /* Planifier scroll vers section suivante */
+  /* Planifier prochain scroll */
   function planifierProchainScroll() {
     clearTimeout(state.timer);
 
@@ -91,32 +85,26 @@ var W2KAutoScroll = (function () {
 
       state.currentSection++;
 
-      /* Vérifier si fin de page */
+      /* Fin de page - page suivante ou boucle */
       if (state.currentSection >= state.sections.length) {
-        /* Redirection vers page suivante */
         var nextPage = document.body.dataset.nextPage;
         if (nextPage) {
-          setTimeout(function () {
-            window.location.href = nextPage;
-          }, config.pauseDuration * 1000);
+          window.location.href = nextPage;
           return;
         } else {
-          /* Boucle sur la même page */
           state.currentSection = 0;
         }
       }
 
-      /* Scroller vers section */
-      scrollerVersSection(state.currentSection);
-
-      /* Planifier suivant */
-      planifierProchainScroll();
+      scrollerVersSection(state.currentSection, function () {
+        planifierProchainScroll();
+      });
 
     }, config.pauseDuration * 1000);
   }
 
-  /* Scroller vers une section - animation lente progressive */
-  function scrollerVersSection(index) {
+  /* Animation scroll lente et progressive */
+  function scrollerVersSection(index, callback) {
     if (index < 0 || index >= state.sections.length) return;
 
     var section = state.sections[index];
@@ -124,15 +112,31 @@ var W2KAutoScroll = (function () {
     var targetTop = section.getBoundingClientRect().top + window.scrollY - headerHeight;
     var startTop = window.scrollY;
     var distance = targetTop - startTop;
-    var duration = Math.min(Math.abs(distance) * 2, speeds[config.speed] || 2500);
+
+    if (Math.abs(distance) < 5) {
+      if (callback) callback();
+      return;
+    }
+
+    var duration = speeds[config.speed] || 2500;
     var startTime = null;
 
-    function animationScroll(currentTime) {
+    /* Bloquer detection scroll pendant animation */
+    state.ignoreScroll = true;
+    state.isAutoScrolling = true;
+
+    function animer(currentTime) {
+      if (state.isPaused) {
+        state.ignoreScroll = false;
+        state.isAutoScrolling = false;
+        return;
+      }
+
       if (!startTime) startTime = currentTime;
       var elapsed = currentTime - startTime;
       var progress = Math.min(elapsed / duration, 1);
 
-      /* Easing doux (ease-in-out) */
+      /* Easing doux ease-in-out */
       var ease = progress < 0.5
         ? 2 * progress * progress
         : 1 - Math.pow(-2 * progress + 2, 2) / 2;
@@ -140,25 +144,29 @@ var W2KAutoScroll = (function () {
       window.scrollTo(0, startTop + distance * ease);
 
       if (progress < 1) {
-        requestAnimationFrame(animationScroll);
+        requestAnimationFrame(animer);
+      } else {
+        /* Fin animation - debloquer apres court delai */
+        setTimeout(function () {
+          state.ignoreScroll = false;
+          state.isAutoScrolling = false;
+        }, 200);
+        if (callback) callback();
       }
     }
 
-    requestAnimationFrame(animationScroll);
+    requestAnimationFrame(animer);
   }
 
   /* Mettre en pause */
   function pause() {
+    if (state.isPaused) return;
     state.isPaused = true;
-    state.isScrolling = false;
+    state.isAutoScrolling = false;
     clearTimeout(state.timer);
     clearTimeout(state.inactivityTimer);
+    majIndicateur();
 
-    if (state.indicator) {
-      state.indicator.classList.add('paused');
-    }
-
-    /* Reprendre après inactivité */
     state.inactivityTimer = setTimeout(function () {
       reprendre();
     }, config.inactivityDelay * 1000);
@@ -167,22 +175,18 @@ var W2KAutoScroll = (function () {
   /* Reprendre */
   function reprendre() {
     state.isPaused = false;
-
-    /* Trouver section actuelle visible */
     detecterSectionVisible();
-
-    /* Redémarrer */
-    demarrerAutoScroll();
+    majIndicateur();
+    planifierProchainScroll();
   }
 
-  /* Détecter section visible */
+  /* Detecter section visible */
   function detecterSectionVisible() {
     var scrollPos = window.scrollY + window.innerHeight / 2;
 
     for (var i = 0; i < state.sections.length; i++) {
       var section = state.sections[i];
-      var rect = section.getBoundingClientRect();
-      var sectionTop = rect.top + window.scrollY;
+      var sectionTop = section.offsetTop;
       var sectionBottom = sectionTop + section.offsetHeight;
 
       if (scrollPos >= sectionTop && scrollPos < sectionBottom) {
@@ -192,16 +196,13 @@ var W2KAutoScroll = (function () {
     }
   }
 
-  /* Écouter interactions utilisateur */
+  /* Ecouter interactions utilisateur */
   function ecouterInteractions() {
-    var events = ['click', 'touchstart', 'wheel', 'keydown'];
-
-    events.forEach(function (eventType) {
-      document.addEventListener(eventType, function () {
-        if (state.isScrolling || !state.isPaused) {
+    ['touchstart', 'wheel', 'keydown'].forEach(function (evt) {
+      document.addEventListener(evt, function () {
+        if (!state.isPaused) {
           pause();
         } else {
-          /* Réinitialiser timer inactivité */
           clearTimeout(state.inactivityTimer);
           state.inactivityTimer = setTimeout(function () {
             reprendre();
@@ -210,24 +211,20 @@ var W2KAutoScroll = (function () {
       }, { passive: true });
     });
 
-    /* Scroll manuel */
-    var lastScrollTop = 0;
+    /* Scroll manuel - ignorer pendant auto-scroll */
     var scrollTimeout;
     window.addEventListener('scroll', function () {
+      if (state.ignoreScroll || state.isAutoScrolling) return;
+
       clearTimeout(scrollTimeout);
       scrollTimeout = setTimeout(function () {
-        var currentScroll = window.scrollY;
-        if (Math.abs(currentScroll - lastScrollTop) > 50) {
-          if (!state.isPaused) {
-            pause();
-          }
+        if (!state.isPaused && !state.isAutoScrolling) {
+          pause();
         }
-        lastScrollTop = currentScroll;
-      }, 100);
+      }, 150);
     }, { passive: true });
   }
 
-  /* API publique */
   return {
     init: init,
     pause: pause,
