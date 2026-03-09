@@ -9,7 +9,7 @@ var W2KAutoScroll = (function () {
   /* Configuration par défaut */
   var config = {
     speed: 'slow',
-    pauseDuration: 12,
+    pauseDuration: 20,
     inactivityDelay: 45,
     showIndicator: true
   };
@@ -22,14 +22,14 @@ var W2KAutoScroll = (function () {
     timer: null,
     inactivityTimer: null,
     indicator: null,
-    startDelay: 3000
+    startDelay: 5000
   };
 
   /* Vitesses de défilement en ms */
   var speeds = {
-    slow: 1500,
-    medium: 1000,
-    fast: 600
+    slow: 2500,
+    medium: 1500,
+    fast: 1000
   };
 
   /* Initialisation */
@@ -115,18 +115,36 @@ var W2KAutoScroll = (function () {
     }, config.pauseDuration * 1000);
   }
 
-  /* Scroller vers une section */
+  /* Scroller vers une section - animation lente progressive */
   function scrollerVersSection(index) {
     if (index < 0 || index >= state.sections.length) return;
 
     var section = state.sections[index];
     var headerHeight = 80;
-    var top = section.getBoundingClientRect().top + window.scrollY - headerHeight;
+    var targetTop = section.getBoundingClientRect().top + window.scrollY - headerHeight;
+    var startTop = window.scrollY;
+    var distance = targetTop - startTop;
+    var duration = Math.min(Math.abs(distance) * 2, speeds[config.speed] || 2500);
+    var startTime = null;
 
-    window.scrollTo({
-      top: top,
-      behavior: 'smooth'
-    });
+    function animationScroll(currentTime) {
+      if (!startTime) startTime = currentTime;
+      var elapsed = currentTime - startTime;
+      var progress = Math.min(elapsed / duration, 1);
+
+      /* Easing doux (ease-in-out) */
+      var ease = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+      window.scrollTo(0, startTop + distance * ease);
+
+      if (progress < 1) {
+        requestAnimationFrame(animationScroll);
+      }
+    }
+
+    requestAnimationFrame(animationScroll);
   }
 
   /* Mettre en pause */
