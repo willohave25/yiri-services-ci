@@ -89,7 +89,7 @@ p { margin-bottom: 16px; }
   width: 100%;
   max-width: var(--container);
   margin: 0 auto;
-  padding: 0 16px;
+  padding: 0 24px;
 }
 
 /* --- Boutons --- */
